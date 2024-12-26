@@ -203,7 +203,7 @@ if samplesPerPixel <= 1 then
         
         -- Draw sample info text
         g:set_color(0, 0, 0)
-        local text = string.format("Sample: %d Value: %.3f", sampleIndex, value)
+        local text = string.format("Index: %d Value: %.3f", sampleIndex, value)
         g:draw_text(text, 5, self.height - 30, 190, 10)
       end
     end
@@ -211,10 +211,12 @@ if samplesPerPixel <= 1 then
   
   -- Draw info text
   g:set_color(100, 100, 100)
-  g:draw_text(string.format("Range: %.2f to %.2f", minVal, maxVal), 5, 5, 190, 10)
-  g:draw_text(string.format("View: %d-%d/%d (%.1f sp/px)", 
+  g:draw_text(string.format("%.2f", maxVal), 5, 5, 190, 10)
+  local samplesPerPixel = self.viewSize / self.width
+  local format = samplesPerPixel < 1 and "%.2f" or "%.0f"
+  g:draw_text(string.format("%d..%d (" .. format .. " sp/px)", 
     self.startIndex, math.min(self.startIndex + self.viewSize, length), 
-    length, self.viewSize/self.width), 5, self.height - 15, 190, 10)
+    samplesPerPixel), 5, self.height - 15, 190, 10)
 end
 
 function explore:mouse_down(x, y)
