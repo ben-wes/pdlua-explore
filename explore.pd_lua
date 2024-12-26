@@ -26,8 +26,38 @@ function explore:initialize(sel, atoms)
   self.startIndex = 0  -- Start of visible window
   self.viewSize = self.arrayLength  -- Initially show full array
   
+  -- Add hover tracking
+  self.hoverX = nil
+  self.hoverY = nil
+  
+  self:set_size(self.width, self.height)
+
+  -- Add frame clock
+  self.frameClock = pd.Clock:new():register(self, "frame")
+  self.frameRate = 20  -- 20 fps
+  self.frameClock:delay(1000 / self.frameRate)  -- Convert to milliseconds
+  
   self:set_size(self.width, self.height)
   return true
+end
+
+function explore:frame()
+  self:repaint()
+  -- Schedule next frame
+  self.frameClock:delay(1000 / self.frameRate)
+end
+
+-- Add cleanup to stop the clock when the object is destroyed
+function explore:destroy()
+  if self.frameClock then
+    self.frameClock:destruct()
+  end
+end
+
+function explore:mouse_move(x, y)
+  self.hoverX = x
+  self.hoverY = y
+  self:repaint()
 end
 
 function explore:paint(g)
@@ -43,24 +73,39 @@ function explore:paint(g)
   g:set_color(240, 240, 240)
   g:fill_all()
   
-  -- Draw center line
-  g:set_color(200, 200, 200)
-  g:draw_line(0, self.height/2, self.width, self.height/2, 1)
-  
   -- Ensure view parameters are valid
   self.viewSize = math.max(1, math.min(self.viewSize, length))
   self.startIndex = math.max(0, math.min(self.startIndex, length - self.viewSize))
   
-  -- Find min/max values in view range
-  local minVal, maxVal = math.huge, -math.huge
-  for i = self.startIndex, math.min(self.startIndex + self.viewSize - 1, length - 1) do
-    local val = array:get(i)
-    if val then
-      minVal = math.min(minVal, val)
-      maxVal = math.max(maxVal, val)
-    end
-  end
+  local samplesPerPixel = self.viewSize / self.width
   
+  -- Find min/max values in view range using same sampling as drawing
+  local minVal, maxVal = math.huge, -math.huge
+  if samplesPerPixel <= 1 then
+      -- When zoomed in, look at actual samples including the rightmost one
+      local visibleSamples = math.min(self.viewSize + 1, length - self.startIndex)
+      for i = self.startIndex, self.startIndex + visibleSamples - 1 do
+        local val = array:get(i)
+        if val then
+          minVal = math.min(minVal, val)
+          maxVal = math.max(maxVal, val)
+        end
+      end
+  else
+      -- When zoomed out, sample at pixel intervals
+      local step = self.viewSize / self.width
+      for i = 0, self.width - 1 do
+        local index = math.floor(self.startIndex + i * step)
+        if index < length then
+          local val = array:get(index)
+          if val then
+            minVal = math.min(minVal, val)
+            maxVal = math.max(maxVal, val)
+          end
+        end
+      end
+  end
+
   if minVal == maxVal then
     minVal = minVal - 0.5
     maxVal = maxVal + 0.5
@@ -69,36 +114,100 @@ function explore:paint(g)
   -- Scale factor for y values
   local scale = (self.height/2 - 2) / math.max(math.abs(minVal), math.abs(maxVal))
   
+  -- Draw center line - always visible since we center around 0
+  g:set_color(200, 200, 200)
+  local zeroY = self.height/2
+  g:draw_line(0, zeroY, self.width, zeroY, 1)
+
+  -- Draw hover highlight line behind waveform if needed
+  if samplesPerPixel <= 1 and self.hoverX and self.hoverX >= 0 and self.hoverX < self.width then
+    local sampleOffset = math.floor(((self.hoverX - 1) * self.width / (self.width - 2)) * samplesPerPixel)
+    -- Calculate x position same way as for the sample highlight
+    local x = 2 + (sampleOffset / samplesPerPixel) * (self.width - 2) / self.width
+    g:set_color(200, 200, 200)
+    g:draw_line(x, 0, x, self.height, 1)
+  end  
   -- Draw waveform
   g:set_color(0, 0, 0)
   
-  -- Sample step size (samples per pixel)
-  local step = self.viewSize / self.width
-  
-  -- Start path with first point
-  local firstVal = array:get(self.startIndex)
-  local firstY = self.height/2 - (firstVal * scale)
-  local p = Path(0, firstY)
-  
-  -- Add line segments connecting each sample
-  local lastX = 0
-  local lastY = firstY
-  
-  for i = 1, self.width do
-    local index = math.floor(self.startIndex + (i-1) * step)
-    if index < length then
-      local val = array:get(index)
+if samplesPerPixel <= 1 then
+    -- Zoomed in mode - direct lines between samples
+    -- First draw connecting lines in bright color
+    g:set_color(150, 150, 150)
+    
+    local firstVal = array:get(self.startIndex)
+    local firstY = self.height/2 - (firstVal * scale)
+    local p = Path(1, firstY)  -- Start at x=1
+    
+    -- Adjust the range to ensure we include the rightmost sample
+    local visibleSamples = math.min(self.viewSize + 1, length - self.startIndex)
+    
+    -- Iterate over actual samples
+    for i = 0, visibleSamples - 1 do
+      local val = array:get(self.startIndex + i)
       if val then
-        local x = i-1
+        -- Convert sample index to pixel position, scaled to width-2 pixels
+        local x = 1 + (i / samplesPerPixel) * (self.width - 2) / self.width
         local y = self.height/2 - (val * scale)
         p:line_to(x, y)
-        lastX = x
-        lastY = y
+      end
+    end
+    g:stroke_path(p, 1)
+    
+    -- Then draw sample points in black
+    g:set_color(0, 0, 0)
+    for i = 0, visibleSamples - 1 do
+      local val = array:get(self.startIndex + i)
+      if val then
+        local x = 1 + (i / samplesPerPixel) * (self.width - 2) / self.width
+        local y = self.height/2 - (val * scale)
+        g:fill_rect(x, y, 2, 2)
+      end
+    end
+  else
+    -- Zoomed out mode - use full width
+    local step = self.viewSize / self.width
+    local firstVal = array:get(self.startIndex)
+    local firstY = self.height/2 - (firstVal * scale)
+    local p = Path(0, firstY)  -- Start at x=0
+    
+    for i = 1, self.width - 1 do
+      local index = math.floor(self.startIndex + i * step)
+      if index < length then
+        local val = array:get(index)
+        if val then
+          local x = i
+          local y = self.height/2 - (val * scale)
+          p:line_to(x, y)
+        end
+      end
+    end
+    g:stroke_path(p, 1)
+  end
+
+  -- Also adjust hover detection to match the drawing mode
+  if samplesPerPixel <= 1 and self.hoverX and self.hoverX >= 1 and self.hoverX < self.width-1 then
+    -- Convert pixel position back to sample offset, accounting for the border in zoomed mode
+    local sampleOffset = math.floor(((self.hoverX - 1) * self.width / (self.width - 2)) * samplesPerPixel)
+    local sampleIndex = self.startIndex + sampleOffset
+    
+    if sampleIndex < length then
+      local value = array:get(sampleIndex)
+      if value then
+        -- Convert exact sample position back to pixels
+        local x = 1 + (sampleOffset / samplesPerPixel) * (self.width - 2) / self.width
+        local y = self.height/2 - (value * scale)
+        
+        g:set_color(0, 80, 160)
+        g:stroke_rect(x-1, y-1, 3, 3, 1)
+        
+        -- Draw sample info text
+        g:set_color(0, 0, 0)
+        local text = string.format("Sample: %d Value: %.3f", sampleIndex, value)
+        g:draw_text(text, 5, self.height - 30, 190, 10)
       end
     end
   end
-  
-  g:stroke_path(p, 1)
   
   -- Draw info text
   g:set_color(100, 100, 100)
@@ -109,12 +218,13 @@ function explore:paint(g)
 end
 
 function explore:mouse_down(x, y)
-  -- Just store start position and view state
+  -- Store start position and view state
   self.dragStartX = x
   self.dragStartY = y
   self.dragStartViewSize = self.viewSize
   self.dragStartIndex = self.startIndex
-  self.dragStartSample = math.floor(self.startIndex + (x / self.width) * self.viewSize)
+  -- Also store where in the view we clicked (as a fraction)
+  self.dragStartFraction = x / self.width
 end
 
 function explore:mouse_drag(x, y)
@@ -122,20 +232,34 @@ function explore:mouse_drag(x, y)
   if not array then return end
   local length = array:length()
 
+  -- Calculate initial samples per pixel
+  local currentSamplesPerPixel = self.dragStartViewSize / self.width
+
   -- Calculate zoom factor based on vertical drag
   local dy = (y - self.dragStartY) * 0.01
   local zoomFactor = math.exp(dy)
-  local newViewSize = math.max(self.width, math.min(length,
-    math.floor(self.dragStartViewSize * zoomFactor)))
   
+  -- Calculate target samples per pixel
+  local targetSamplesPerPixel = currentSamplesPerPixel * zoomFactor
+  
+  -- Handle 1:1 zoom boundary
+  if targetSamplesPerPixel < 1 then
+    if currentSamplesPerPixel > 1 then
+      -- If coming from zoomed out, clamp to 1:1
+      targetSamplesPerPixel = 1
+    end
+    -- Otherwise allow zooming past 1:1
+  end
+  
+  local newViewSize = math.max(1, math.min(length,
+    math.floor(self.width * targetSamplesPerPixel)))
+
   -- Calculate the pixel offset where the original sample should now be
   local dx = x - self.dragStartX
-  -- Use current view size for samples-per-pixel calculation
-  local samplesPerPixel = newViewSize / self.width
-  local sampleOffset = dx * samplesPerPixel
-  
-  -- Calculate new start index that maintains the clicked point under the mouse
-  local newStart = self.dragStartSample - sampleOffset - (newViewSize / 2)
+  -- Calculate new start index keeping the same view fraction under mouse
+  local currentFraction = (x / self.width)
+  local sampleAtMouse = self.dragStartIndex + (self.dragStartFraction * self.dragStartViewSize)
+  local newStart = sampleAtMouse - (currentFraction * newViewSize)
   
   -- Update view parameters ensuring bounds
   self.viewSize = newViewSize
