@@ -43,6 +43,7 @@ function explore:initialize(sel, atoms)
   self.frameRate = 20  -- fps
   self.frameClock:delay(1000 / self.frameRate)
   self.arrayMissing = false
+  self.markerIndex = -1
   
   self:set_size(self.width, self.height)
   return true
@@ -57,6 +58,11 @@ function explore:destroy()
   if self.frameClock then
     self.frameClock:destruct()
   end
+end
+
+function explore:in_1_float(f)
+ self.markerIndex = f
+ self:repaint()
 end
 
 function explore:in_1_width(x)
@@ -116,7 +122,7 @@ function explore:paint(g)
     return 
   end
   self.arrayMissing = false  -- Reset when array is found
-  
+
   local length = array:length()
   self.arrayLength = length
 
@@ -166,6 +172,27 @@ function explore:paint(g)
   local zeroY = self.height/2
   g:draw_line(0, zeroY, self.width, zeroY, 1)
 
+  -- Draw marker line if enabled
+  if self.markerIndex >= 0 then
+    if samplesPerPixel <= 1 then
+      -- Zoomed in mode - use adjusted x position
+      local markerOffset = self.markerIndex - self.startIndex
+      local x = 1 + (markerOffset / samplesPerPixel) * (self.width - 2) / self.width
+      if x >= 1 and x <= self.width-1 then
+        g:set_color(255, 0, 0)
+        g:draw_line(x, 0, x, self.height, 1)
+      end
+    else
+      -- Zoomed out mode - direct pixel mapping
+      local step = self.viewSize / self.width
+      local x = (self.markerIndex - self.startIndex) / step
+      if x >= 0 and x <= self.width then
+        g:set_color(255, 0, 0)
+        g:draw_line(x, 0, x, self.height, 1)
+      end
+    end
+  end
+
   -- Draw hover highlight line behind waveform if needed
   if samplesPerPixel <= 1 and self.hoverX and self.hoverX >= 0 and self.hoverX < self.width then
     local sampleOffset = math.floor(((self.hoverX - 1) * self.width / (self.width - 2)) * samplesPerPixel)
@@ -177,7 +204,7 @@ function explore:paint(g)
   -- Draw waveform
   g:set_color(0, 0, 0)
   
-if samplesPerPixel <= 1 then
+  if samplesPerPixel <= 1 then
     -- Zoomed in mode - direct lines between samples
     -- First draw connecting lines in bright color
     g:set_color(150, 150, 150)
