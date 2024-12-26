@@ -4,10 +4,23 @@ function explore:initialize(sel, atoms)
   self.inlets = 1
   self.outlets = 1
   
-  -- Store array name from creation argument
-  if type(atoms[1]) == "string" then
-    self.arrayName = atoms[1]
-    -- Try to get initial array length
+  -- View parameters
+  self.width = 200
+  self.height = 140
+  
+  -- Parse creation arguments
+  for i, arg in ipairs(atoms) do
+    if arg == "-width" then
+      self.width = math.max(math.floor(atoms[i+1] or 200), 96)
+    elseif arg == "-height" then
+      self.height = math.max(math.floor(atoms[i+1] or 140), 140)
+    elseif type(arg) == "string" then
+      self.arrayName = arg
+    end
+  end
+  
+  -- Try to get initial array
+  if self.arrayName then
     local array = pd.Table:new():sync(self.arrayName)
     if array then
       self.arrayLength = array:length()
@@ -20,25 +33,52 @@ function explore:initialize(sel, atoms)
     return false
   end
   
-  -- View parameters
-  self.width = 200
-  self.height = 140
-  self.startIndex = 0  -- Start of visible window
-  self.viewSize = self.arrayLength  -- Initially show full array
-  
-  -- Add hover tracking
+  self.startIndex = 0
+  self.viewSize = self.arrayLength
   self.hoverX = nil
   self.hoverY = nil
   
-  self:set_size(self.width, self.height)
-
   -- Add frame clock
   self.frameClock = pd.Clock:new():register(self, "frame")
   self.frameRate = 20  -- 20 fps
-  self.frameClock:delay(1000 / self.frameRate)  -- Convert to milliseconds
+  self.frameClock:delay(1000 / self.frameRate)
   
   self:set_size(self.width, self.height)
   return true
+end
+
+function explore:frame()
+  self:repaint()
+  self.frameClock:delay(1000 / self.frameRate)
+end
+
+function explore:destroy()
+  if self.frameClock then
+    self.frameClock:destruct()
+  end
+end
+
+function explore:in_1_width(x)
+  self.width = math.max(math.floor(x[1] or 200), 96)
+  self:set_args(self:get_creation_args())
+  self:set_size(self.width, self.height)
+  self:repaint()
+end
+
+function explore:in_1_height(x)
+  self.height = math.max(math.floor(x[1] or 140), 140)
+  self:set_args(self:get_creation_args())
+  self:set_size(self.width, self.height)
+  self:repaint()
+end
+
+function explore:get_creation_args()
+  local args = {self.arrayName}
+  table.insert(args, "-width")
+  table.insert(args, self.width)
+  table.insert(args, "-height")
+  table.insert(args, self.height)
+  return args
 end
 
 function explore:frame()
