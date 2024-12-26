@@ -40,8 +40,9 @@ function explore:initialize(sel, atoms)
   
   -- Add frame clock
   self.frameClock = pd.Clock:new():register(self, "frame")
-  self.frameRate = 20  -- 20 fps
+  self.frameRate = 20  -- fps
   self.frameClock:delay(1000 / self.frameRate)
+  self.arrayMissing = false
   
   self:set_size(self.width, self.height)
   return true
@@ -101,18 +102,24 @@ function explore:mouse_move(x, y)
 end
 
 function explore:paint(g)
-  -- Get array data
-  local array = pd.Table:new():sync(self.arrayName)
-  if not array then return end
-  
-  local length = array:length()
-  if length == 0 then return end
-  self.arrayLength = length
-  
   -- Draw background
   g:set_color(240, 240, 240)
   g:fill_all()
   
+  -- Get array data
+  local array = pd.Table:new():sync(self.arrayName)
+  if not array then 
+    if not self.arrayMissing then
+      self:error(string.format("array '%s' not found", self.arrayName))
+      self.arrayMissing = true
+    end
+    return 
+  end
+  self.arrayMissing = false  -- Reset when array is found
+  
+  local length = array:length()
+  self.arrayLength = length
+
   -- Ensure view parameters are valid
   self.viewSize = math.max(1, math.min(self.viewSize, length))
   self.startIndex = math.max(0, math.min(self.startIndex, length - self.viewSize))
