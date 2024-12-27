@@ -19,31 +19,28 @@ function explore:initialize(sel, atoms)
     end
   end
   
-  -- Try to get initial array
-  if self.arrayName then
-    local array = pd.table(self.arrayName)
-    if array then
-      self.arrayLength = array:length()
-    else
-      self:error("explore: array " .. self.arrayName .. " not found")
-      return false
-    end
-  else
-    self:error("explore: expected array name as argument")
-    return false
-  end
-  
+  -- Initialize view parameters with safe defaults
+  self.arrayLength = 1  -- Safe default
   self.startIndex = 0
-  self.viewSize = self.arrayLength
-  self.hoverX = nil
-  self.hoverY = nil
+  self.viewSize = 1
+  
+  -- Initialize markers array and color configuration
+  self.markers = {}
+  self.colors = {
+    graphGradients = {
+      hue =        {210, 340},
+      saturation = { 90,  94},
+      brightness = { 70,  80},
+    }
+  }
   
   -- Add frame clock
   self.frameClock = pd.Clock:new():register(self, "frame")
   self.frameRate = 20  -- fps
   self.frameClock:delay(1000 / self.frameRate)
   self.arrayMissing = false
-  self.markerIndex = -1
+  
+  self.manualScale = nil  -- nil means auto-scale
   
   self:set_size(self.width, self.height)
   return true
@@ -61,8 +58,34 @@ function explore:destroy()
 end
 
 function explore:in_1_float(f)
- self.markerIndex = f
- self:repaint()
+  -- Handle single float as a special case
+  self.markers = {}
+  local colors = self:generate_colors(1)
+  
+  table.insert(self.markers, {
+    index = f or 0,
+    color = colors[1]
+  })
+  
+  self:repaint()
+end
+
+function explore:in_1_list(atoms)
+  -- Clear existing markers
+  self.markers = {}
+  
+  -- Generate colors for all markers using our palette
+  local colors = self:generate_colors(#atoms)
+  
+  -- Create a marker for each input value with corresponding color
+  for i, value in ipairs(atoms) do
+    table.insert(self.markers, {
+      index = value or 0,
+      color = colors[i]
+    })
+  end
+  
+  self:repaint()
 end
 
 function explore:in_1_width(x)
@@ -113,55 +136,53 @@ function explore:paint(g)
   g:fill_all()
   
   -- Get array data
-  local array = pd.table(self.arrayName)
-  if not array then 
-    if not self.arrayMissing then
-      self:error(string.format("array '%s' not found", self.arrayName))
-      self.arrayMissing = true
-    end
-    return 
-  end
-  self.arrayMissing = false  -- Reset when array is found
-
-  local length = array:length()
-  self.arrayLength = length
-
+  local array = self:get_array()
+  if not array then return end
+  local length = self.arrayLength  -- Use the cached length
+  
   -- Ensure view parameters are valid
-  self.viewSize = math.max(1, math.min(self.viewSize, length))
-  self.startIndex = math.max(0, math.min(self.startIndex, length - self.viewSize))
+  self.viewSize = math.max(1, math.min(self.viewSize, self.arrayLength))
+  self.startIndex = math.max(0, math.min(self.startIndex, self.arrayLength - self.viewSize))
   
   local samplesPerPixel = self.viewSize / self.width
-  
-  -- Find min/max values in view range using same sampling as drawing
-  local minVal, maxVal = math.huge, -math.huge
-  if samplesPerPixel <= 1 then
-    -- When zoomed in, look at actual samples including the rightmost one
-    local visibleSamples = math.min(self.viewSize + 1, length - self.startIndex)
-    for i = self.startIndex, self.startIndex + visibleSamples - 1 do
-      local val = array:get(i)
-      if val then
-        minVal = math.min(minVal, val)
-        maxVal = math.max(maxVal, val)
-      end
-    end
-  else
-    -- When zoomed out, sample at pixel intervals
-    local step = self.viewSize / self.width
-    for i = 0, self.width - 1 do
-      local index = math.floor(self.startIndex + i * step)
-      if index < length then
-        local val = array:get(index)
+    local minVal, maxVal = math.huge, -math.huge
+
+  -- Only calculate min/max if we're using auto-scale
+  if not self.manualScale then
+    -- Find min/max values in view range using same sampling as drawing
+    if samplesPerPixel <= 1 then
+      -- When zoomed in, look at actual samples including the rightmost one
+      local visibleSamples = math.min(self.viewSize + 1, length - self.startIndex)
+      for i = self.startIndex, self.startIndex + visibleSamples - 1 do
+        local val = array:get(i)
         if val then
           minVal = math.min(minVal, val)
           maxVal = math.max(maxVal, val)
         end
       end
+    else
+      -- When zoomed out, sample at pixel intervals
+      local step = self.viewSize / self.width
+      for i = 0, self.width - 1 do
+        local index = math.floor(self.startIndex + i * step)
+        if index < length then
+          local val = array:get(index)
+          if val then
+            minVal = math.min(minVal, val)
+            maxVal = math.max(maxVal, val)
+          end
+        end
+      end
     end
-  end
 
-  if minVal == maxVal then
-    minVal = minVal - 0.5
-    maxVal = maxVal + 0.5
+    if minVal == maxVal then
+      minVal = minVal - 0.5
+      maxVal = maxVal + 0.5
+    end
+  else
+    -- Use manual scale
+    minVal = -self.manualScale
+    maxVal = self.manualScale
   end
   
   -- Scale factor for y values
@@ -171,27 +192,6 @@ function explore:paint(g)
   g:set_color(200, 200, 200)
   local zeroY = self.height/2
   g:draw_line(0, zeroY, self.width, zeroY, 1)
-
-  -- Draw marker line if enabled
-  if self.markerIndex >= 0 then
-    if samplesPerPixel <= 1 then
-      -- Zoomed in mode - use adjusted x position
-      local markerOffset = self.markerIndex - self.startIndex
-      local x = 1 + (markerOffset / samplesPerPixel) * (self.width - 2) / self.width
-      if x >= 1 and x <= self.width-1 then
-        g:set_color(255, 0, 0)
-        g:draw_line(x, 0, x, self.height, 1)
-      end
-    else
-      -- Zoomed out mode - direct pixel mapping
-      local step = self.viewSize / self.width
-      local x = (self.markerIndex - self.startIndex) / step
-      if x >= 0 and x <= self.width then
-        g:set_color(255, 0, 0)
-        g:draw_line(x, 0, x, self.height, 1)
-      end
-    end
-  end
 
   -- Draw hover highlight line behind waveform if needed
   if samplesPerPixel <= 1 and self.hoverX and self.hoverX >= 0 and self.hoverX < self.width then
@@ -291,6 +291,30 @@ function explore:paint(g)
   g:draw_text(string.format("%d..%d (" .. format .. " sp/px)", 
     self.startIndex, math.min(self.startIndex + self.viewSize, length), 
     samplesPerPixel), 5, self.height - 15, 190, 10)
+
+  -- Draw markers
+  for _, marker in ipairs(self.markers) do
+    -- Set the color for this marker
+    g:set_color(table.unpack(marker.color))
+    
+    -- Calculate marker position based on zoom level
+    local x
+    if samplesPerPixel <= 1 then
+      -- Zoomed in mode - use adjusted x position
+      local markerOffset = marker.index - self.startIndex
+      x = 1 + (markerOffset / samplesPerPixel) * (self.width - 2) / self.width
+    else
+      -- Zoomed out mode - direct pixel mapping
+      local step = self.viewSize / self.width
+      x = (marker.index - self.startIndex) / step
+    end
+    
+    -- Only draw if marker is in view
+    if x >= 0 and x <= self.width then
+      -- Draw marker line
+      g:draw_line(x, 0, x, self.height, 1)
+    end
+  end
 end
 
 function explore:mouse_down(x, y)
@@ -318,16 +342,9 @@ function explore:mouse_drag(x, y)
   -- Calculate target samples per pixel
   local targetSamplesPerPixel = currentSamplesPerPixel * zoomFactor
   
-  -- Handle 1:1 zoom boundary
-  if targetSamplesPerPixel < 1 then
-    if currentSamplesPerPixel > 1 then
-      -- If coming from zoomed out, clamp to 1:1
-      targetSamplesPerPixel = 1
-    end
-    -- Otherwise allow zooming past 1:1
-  end
-  
-  local newViewSize = math.max(1, math.min(length,
+  -- Ensure minimum 3 samples in view
+  local minViewSize = 2
+  local newViewSize = math.max(minViewSize, math.min(length,
     math.floor(self.width * targetSamplesPerPixel)))
 
   -- Calculate the pixel offset where the original sample should now be
@@ -357,4 +374,75 @@ function explore:in_1_symbol(name)
       self:repaint()
     end
   end
+end
+
+function explore:hsv_to_rgb(h, s, v)
+  h = h % 360  -- Ensure h is in the range 0-359
+  s = s / 100  -- Convert s to 0-1 range
+  v = v / 100  -- Convert v to 0-1 range
+
+  local c = v * s
+  local x = c * (1 - math.abs((h / 60) % 2 - 1))
+  local m = v - c
+
+  local r, g, b
+  if h < 60 then
+    r, g, b = c, x, 0
+  elseif h < 120 then
+    r, g, b = x, c, 0
+  elseif h < 180 then
+    r, g, b = 0, c, x
+  elseif h < 240 then
+    r, g, b = 0, x, c
+  elseif h < 300 then
+    r, g, b = x, 0, c
+  else
+    r, g, b = c, 0, x
+  end
+
+  return math.floor((r + m) * 255 + 0.5), 
+         math.floor((g + m) * 255 + 0.5), 
+         math.floor((b + m) * 255 + 0.5)
+end
+
+function explore:generate_colors(count)
+  local colors = {}
+  local hue_start, hue_end = table.unpack(self.colors.graphGradients.hue)
+  local sat_start, sat_end = table.unpack(self.colors.graphGradients.saturation)
+  local bright_start, bright_end = table.unpack(self.colors.graphGradients.brightness)
+
+  for i = 1, count do
+    local hue = hue_start + (hue_end - hue_start) * ((i - 1) / math.max(1, count - 1))
+    local saturation = sat_start + (sat_end - sat_start) * ((i - 1) / math.max(1, count - 1))
+    local brightness = bright_start + (bright_end - bright_start) * ((i - 1) / math.max(1, count - 1))
+    local r, g, b = self:hsv_to_rgb(hue, saturation, brightness)
+    table.insert(colors, {r, g, b})
+  end
+
+  return colors
+end
+
+function explore:get_array()
+  -- Helper function to get array and length safely
+  local array = pd.table(self.arrayName)
+  if array then
+    self.arrayLength = array:length()
+    -- Update view size if not yet initialized properly
+    if self.viewSize == 1 then
+      self.viewSize = self.arrayLength
+    end
+    return array
+  end
+  return nil
+end
+
+function explore:in_1_scale(x)
+  if x[1] then
+    -- Set manual scale (-f to +f)
+    self.manualScale = math.abs(x[1])
+  else
+    -- Reset to auto-scale
+    self.manualScale = nil
+  end
+  self:repaint()
 end
