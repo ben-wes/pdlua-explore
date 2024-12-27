@@ -34,7 +34,7 @@ function explore:initialize(sel, atoms)
     }
   }
   
-  -- Add frame clock
+  -- frame clock
   self.frameClock = pd.Clock:new():register(self, "frame")
   self.frameRate = 20  -- fps
   self.frameClock:delay(1000 / self.frameRate)
@@ -42,12 +42,17 @@ function explore:initialize(sel, atoms)
   
   self.manualScale = nil  -- nil means auto-scale
   
+  self.needsRepaint = false
+  
   self:set_size(self.width, self.height)
   return true
 end
 
 function explore:frame()
-  self:repaint()
+  if self.needsRepaint then
+    self:repaint()
+    self.needsRepaint = false
+  end
   self.frameClock:delay(1000 / self.frameRate)
 end
 
@@ -67,7 +72,7 @@ function explore:in_1_float(f)
     color = colors[1]
   })
   
-  self:repaint()
+  self.needsRepaint = true
 end
 
 function explore:in_1_list(atoms)
@@ -85,21 +90,21 @@ function explore:in_1_list(atoms)
     })
   end
   
-  self:repaint()
+  self.needsRepaint = true
 end
 
 function explore:in_1_width(x)
   self.width = math.max(math.floor(x[1] or 200), 96)
   self:set_args(self:get_creation_args())
   self:set_size(self.width, self.height)
-  self:repaint()
+  self.needsRepaint = true
 end
 
 function explore:in_1_height(x)
   self.height = math.max(math.floor(x[1] or 140), 140)
   self:set_args(self:get_creation_args())
   self:set_size(self.width, self.height)
-  self:repaint()
+  self.needsRepaint = true
 end
 
 function explore:get_creation_args()
@@ -117,7 +122,7 @@ function explore:frame()
   self.frameClock:delay(1000 / self.frameRate)
 end
 
--- Add cleanup to stop the clock when the object is destroyed
+-- stop the clock when the object is destroyed
 function explore:destroy()
   if self.frameClock then
     self.frameClock:destruct()
@@ -127,7 +132,7 @@ end
 function explore:mouse_move(x, y)
   self.hoverX = x
   self.hoverY = y
-  self:repaint()
+  self.needsRepaint = true
 end
 
 function explore:paint(g)
@@ -359,7 +364,7 @@ function explore:mouse_drag(x, y)
   self.startIndex = math.max(0, math.min(length - self.viewSize,
     math.floor(newStart)))
   
-  self:repaint()
+  self.needsRepaint = true
 end
 
 function explore:in_1_symbol(name)
@@ -371,7 +376,7 @@ function explore:in_1_symbol(name)
       self.arrayLength = array:length()
       self.startIndex = 0
       self.viewSize = self.arrayLength
-      self:repaint()
+      self.needsRepaint = true
     end
   end
 end
@@ -444,5 +449,5 @@ function explore:in_1_scale(x)
     -- Reset to auto-scale
     self.manualScale = nil
   end
-  self:repaint()
+  self.needsRepaint = true
 end
