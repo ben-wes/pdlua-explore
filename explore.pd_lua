@@ -21,7 +21,7 @@ function explore:initialize(sel, atoms)
   
   -- Try to get initial array
   if self.arrayName then
-    local array = pd.Table:new():sync(self.arrayName)
+    local array = pd.table(self.arrayName)
     if array then
       self.arrayLength = array:length()
     else
@@ -113,7 +113,7 @@ function explore:paint(g)
   g:fill_all()
   
   -- Get array data
-  local array = pd.Table:new():sync(self.arrayName)
+  local array = pd.table(self.arrayName)
   if not array then 
     if not self.arrayMissing then
       self:error(string.format("array '%s' not found", self.arrayName))
@@ -135,28 +135,28 @@ function explore:paint(g)
   -- Find min/max values in view range using same sampling as drawing
   local minVal, maxVal = math.huge, -math.huge
   if samplesPerPixel <= 1 then
-      -- When zoomed in, look at actual samples including the rightmost one
-      local visibleSamples = math.min(self.viewSize + 1, length - self.startIndex)
-      for i = self.startIndex, self.startIndex + visibleSamples - 1 do
-        local val = array:get(i)
+    -- When zoomed in, look at actual samples including the rightmost one
+    local visibleSamples = math.min(self.viewSize + 1, length - self.startIndex)
+    for i = self.startIndex, self.startIndex + visibleSamples - 1 do
+      local val = array:get(i)
+      if val then
+        minVal = math.min(minVal, val)
+        maxVal = math.max(maxVal, val)
+      end
+    end
+  else
+    -- When zoomed out, sample at pixel intervals
+    local step = self.viewSize / self.width
+    for i = 0, self.width - 1 do
+      local index = math.floor(self.startIndex + i * step)
+      if index < length then
+        local val = array:get(index)
         if val then
           minVal = math.min(minVal, val)
           maxVal = math.max(maxVal, val)
         end
       end
-  else
-      -- When zoomed out, sample at pixel intervals
-      local step = self.viewSize / self.width
-      for i = 0, self.width - 1 do
-        local index = math.floor(self.startIndex + i * step)
-        if index < length then
-          local val = array:get(index)
-          if val then
-            minVal = math.min(minVal, val)
-            maxVal = math.max(maxVal, val)
-          end
-        end
-      end
+    end
   end
 
   if minVal == maxVal then
@@ -304,7 +304,7 @@ function explore:mouse_down(x, y)
 end
 
 function explore:mouse_drag(x, y)
-  local array = pd.Table:new():sync(self.arrayName)
+  local array = pd.table(self.arrayName)
   if not array then return end
   local length = array:length()
 
@@ -349,7 +349,7 @@ function explore:in_1_symbol(name)
   if type(name) == "string" then
     self.arrayName = name
     -- Reset view to show full array
-    local array = pd.Table:new():sync(self.arrayName)
+    local array = pd.table(self.arrayName)
     if array then
       self.arrayLength = array:length()
       self.startIndex = 0
