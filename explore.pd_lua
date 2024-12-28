@@ -372,14 +372,8 @@ end
 function explore:in_1_symbol(name)
   if type(name) == "string" then
     self.arrayName = name
-    -- Reset view to show full array
-    local array = pd.table(self.arrayName)
-    if array then
-      self.arrayLength = array:length()
-      self.startIndex = 0
-      self.viewSize = self.arrayLength
-      self.needsRepaint = true
-    end
+    local array = self:get_array()
+    if array then self.needsRepaint = true end
   end
 end
 
