@@ -8,6 +8,9 @@ function explore:initialize(sel, atoms)
   self.width = 200
   self.height = 140
   
+  -- Initialize with no array name
+  self.arrayName = nil
+  
   -- Parse creation arguments
   for i, arg in ipairs(atoms) do
     if arg == "-width" then
@@ -20,7 +23,7 @@ function explore:initialize(sel, atoms)
   end
   
   -- Initialize view parameters with safe defaults
-  self.arrayLength = 1  -- Safe default
+  self.arrayLength = 1
   self.startIndex = 0
   self.viewSize = 1
   
@@ -193,19 +196,20 @@ function explore:paint(g)
   -- Scale factor for y values
   local scale = (self.height/2 - 2) / math.max(math.abs(minVal), math.abs(maxVal))
   
-  -- Draw center line - always visible since we center around 0
+  -- Draw center line
   g:set_color(200, 200, 200)
   local zeroY = self.height/2
   g:draw_line(0, zeroY, self.width, zeroY, 1)
 
-  -- Draw hover highlight line behind waveform if needed
-  if samplesPerPixel <= 1 and self.hoverX and self.hoverX >= 0 and self.hoverX < self.width then
+  -- Draw hover highlight line behind waveform
+  if samplesPerPixel <= 1 and self.hoverX and self.hoverX >= 0 and self.hoverX < self.width-1 then
     local sampleOffset = math.floor(((self.hoverX - 1) * self.width / (self.width - 2)) * samplesPerPixel)
     -- Calculate x position same way as for the sample highlight
     local x = 2 + (sampleOffset / samplesPerPixel) * (self.width - 2) / self.width
     g:set_color(200, 200, 200)
     g:draw_line(x, 0, x, self.height, 1)
   end  
+
   -- Draw waveform
   g:set_color(0, 0, 0)
   
@@ -217,8 +221,6 @@ function explore:paint(g)
     local firstVal = array:get(self.startIndex)
     local firstY = self.height/2 - (firstVal * scale)
     local p = Path(1, firstY)  -- Start at x=1
-    
-    -- Adjust the range to ensure we include the rightmost sample
     local visibleSamples = math.min(self.viewSize + 1, length - self.startIndex)
     
     -- Iterate over actual samples
@@ -264,7 +266,7 @@ function explore:paint(g)
     g:stroke_path(p, 1)
   end
 
-  -- Also adjust hover detection to match the drawing mode
+  -- Draw hover rectangle and text
   if samplesPerPixel <= 1 and self.hoverX and self.hoverX >= 1 and self.hoverX < self.width-1 then
     -- Convert pixel position back to sample offset, accounting for the border in zoomed mode
     local sampleOffset = math.floor(((self.hoverX - 1) * self.width / (self.width - 2)) * samplesPerPixel)
@@ -429,6 +431,8 @@ end
 
 function explore:get_array()
   -- Helper function to get array and length safely
+  if not self.arrayName then return nil end  -- Return nil if no array name set
+  
   local array = pd.table(self.arrayName)
   if array then
     self.arrayLength = array:length()
