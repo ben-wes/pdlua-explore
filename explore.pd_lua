@@ -335,9 +335,10 @@ function explore:mouse_down(x, y)
 end
 
 function explore:mouse_drag(x, y)
-  local array = pd.table(self.arrayName)
+  -- Use get_array helper instead of direct pd.table access
+  local array = self:get_array()
   if not array then return end
-  local length = array:length()
+  local length = self.arrayLength  -- Use cached length
 
   -- Calculate initial samples per pixel
   local currentSamplesPerPixel = self.dragStartViewSize / self.width
