@@ -5,22 +5,10 @@ function explore:initialize(sel, atoms)
   self.outlets = 1
   
   -- View parameters
-  self.width = 200
-  self.height = 140
-  
-  -- Initialize with no array name
-  self.arrayName = nil
+  self.arrayNameUnexpanded = nil
   
   -- Parse creation arguments
-  for i, arg in ipairs(atoms) do
-    if arg == "-width" then
-      self.width = math.max(math.floor(atoms[i+1] or 200), 96)
-    elseif arg == "-height" then
-      self.height = math.max(math.floor(atoms[i+1] or 140), 140)
-    elseif type(arg) == "string" then
-      self.arrayName = arg
-    end
-  end
+  self.width, self.height, self.arrayName = parse_args(atoms)
   
   -- Initialize view parameters with safe defaults
   self.arrayLength = 1
@@ -39,8 +27,10 @@ function explore:initialize(sel, atoms)
   
   -- frame clock
   self.frameClock = pd.Clock:new():register(self, "frame")
+  self.argsClock = pd.Clock:new():register(self, "args")
   self.frameRate = 20  -- fps
   self.frameClock:delay(1000 / self.frameRate)
+  self.argsClock:delay(0)
   self.arrayMissing = false
   
   self.manualScale = nil  -- nil means auto-scale
@@ -49,6 +39,25 @@ function explore:initialize(sel, atoms)
   
   self:set_size(self.width, self.height)
   return true
+end
+
+function parse_args(atoms)
+  local width, height, arrayName = nil, nil, nil
+  for i, arg in ipairs(atoms) do
+    if arg == "-width" then
+      width = math.max(math.floor(atoms[i+1] or 200), 96)
+    elseif arg == "-height" then
+      height = math.max(math.floor(atoms[i+1] or 140), 140)
+    elseif type(arg) == "string" then
+      arrayName = arg
+    end
+  end
+  return width or 200, height or 140, arrayName
+end
+
+function explore:args()
+  local args = self:get_args()
+  self.width, self.height, self.arrayNameUnexpanded = parse_args(args)  -- Parse creation arguments
 end
 
 function explore:frame()
@@ -97,21 +106,21 @@ function explore:in_1_list(atoms)
 end
 
 function explore:in_1_width(x)
-  self.width = math.max(math.floor(x[1] or 200), 96)
+  self.width = math.max(math.floor(x[1] or 200), 24)
   self:set_args(self:get_creation_args())
   self:set_size(self.width, self.height)
   self.needsRepaint = true
 end
 
 function explore:in_1_height(x)
-  self.height = math.max(math.floor(x[1] or 140), 140)
+  self.height = math.max(math.floor(x[1] or 140), 24)
   self:set_args(self:get_creation_args())
   self:set_size(self.width, self.height)
   self.needsRepaint = true
 end
 
 function explore:get_creation_args()
-  local args = {self.arrayName}
+  local args = {self.arrayNameUnexpanded or self.arrayName}
   table.insert(args, "-width")
   table.insert(args, self.width)
   table.insert(args, "-height")
@@ -153,7 +162,7 @@ function explore:paint(g)
   self.startIndex = math.max(0, math.min(self.startIndex, self.arrayLength - self.viewSize))
   
   local samplesPerPixel = self.viewSize / self.width
-    local minVal, maxVal = math.huge, -math.huge
+  local minVal, maxVal = math.huge, -math.huge
 
   -- Only calculate min/max if we're using auto-scale
   if not self.manualScale then
@@ -284,20 +293,32 @@ function explore:paint(g)
         
         -- Draw sample info text
         g:set_color(0, 0, 0)
-        local text = string.format("Index: %d Value: %.3f", sampleIndex, value)
-        g:draw_text(text, 5, self.height - 30, 190, 10)
+        local text = string.format("sample %d: %.4f", sampleIndex, value)
+        g:draw_text(text, 3, 15, 190, 10)
       end
     end
   end
   
   -- Draw info text
-  g:set_color(100, 100, 100)
-  g:draw_text(string.format("%.2f", maxVal), 5, 5, 190, 10)
+  g:set_color(1)
+  -- Draw array name in upper left
+  g:draw_text(self.arrayNameUnexpanded or "no array", 3, 3, 190, 10)
+  -- Draw scale value in upper right
+  g:draw_text(string.format("% 8.2f", maxVal or 0), self.width-50, 3, 50, 10)
+  -- Draw samples info at bottom
   local samplesPerPixel = self.viewSize / self.width
-  local format = samplesPerPixel < 1 and "%.2f" or "%.0f"
-  g:draw_text(string.format("%d..%d (" .. format .. " sp/px)", 
-    self.startIndex, math.min(self.startIndex + self.viewSize, length), 
-    samplesPerPixel), 5, self.height - 15, 190, 10)
+  local formatSamplesPerPixel = samplesPerPixel < 1 and "%.2f" or "%.0f"
+  g:set_color(100, 100, 100)
+  g:draw_text(string.format("1px = ".. samplesPerPixel .. "sp", 
+    samplesPerPixel), 3, self.height - 13, 190, 10)
+  -- Calculate number of digits needed based on array length
+  local numDigits = math.floor(math.log(length, 10)) + 1
+  local indexText = string.format("%d..%d", 
+    self.startIndex, math.min(self.startIndex + self.viewSize, length))
+  local paddedText = string.format("%20s", indexText)
+  
+  g:draw_text(paddedText,
+    self.width - 122, self.height - 13, 120, 10)
 
   -- Draw markers
   for _, marker in ipairs(self.markers) do
@@ -372,7 +393,8 @@ end
 
 function explore:in_1_symbol(name)
   if type(name) == "string" then
-    self.arrayName = name
+    self.arrayNameUnexpanded = name
+    self.arrayName = self:canvas_realizedollar(name)
     local array = self:get_array()
     if array then self.needsRepaint = true end
   end
