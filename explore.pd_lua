@@ -193,8 +193,8 @@ function explore:paint(g)
     end
 
     if minVal == maxVal then
-      minVal = minVal - 0.5
-      maxVal = maxVal + 0.5
+      minVal = minVal - 0.1
+      maxVal = maxVal + 0.1
     end
   else
     -- Use manual scale
@@ -212,9 +212,14 @@ function explore:paint(g)
 
   -- Draw hover highlight line behind waveform
   if samplesPerPixel <= 1 and self.hoverX and self.hoverX >= 0 and self.hoverX < self.width-1 then
-    local sampleOffset = math.floor(((self.hoverX - 1) * self.width / (self.width - 2)) * samplesPerPixel)
+    -- Convert pixel position to sample position, accounting for border
+    local normalizedX = (self.hoverX - 1) * self.width / (self.width - 2)
+    -- Calculate the fractional sample position
+    local exactSampleOffset = normalizedX * samplesPerPixel
+    -- Round to nearest sample instead of floor
+    local sampleOffset = math.floor(exactSampleOffset + 0.5)
     -- Calculate x position same way as for the sample highlight
-    local x = 2 + (sampleOffset / samplesPerPixel) * (self.width - 2) / self.width
+    local x = 1 + (sampleOffset / samplesPerPixel) * (self.width - 2) / self.width
     g:set_color(200, 200, 200)
     g:draw_line(x, 0, x, self.height, 1)
   end  
@@ -276,15 +281,17 @@ function explore:paint(g)
   end
 
   -- Draw hover rectangle and text
-  if samplesPerPixel <= 1 and self.hoverX and self.hoverX >= 1 and self.hoverX < self.width-1 then
-    -- Convert pixel position back to sample offset, accounting for the border in zoomed mode
-    local sampleOffset = math.floor(((self.hoverX - 1) * self.width / (self.width - 2)) * samplesPerPixel)
+  if samplesPerPixel <= 1 and self.hoverX and self.hoverX >= 0 and self.hoverX < self.width-1 then
+    -- Use exactly the same calculations as the vertical line
+    local normalizedX = (self.hoverX - 1) * self.width / (self.width - 2)
+    local exactSampleOffset = normalizedX * samplesPerPixel
+    local sampleOffset = math.floor(exactSampleOffset + 0.5)
     local sampleIndex = self.startIndex + sampleOffset
     
     if sampleIndex < length then
       local value = array:get(sampleIndex)
       if value then
-        -- Convert exact sample position back to pixels
+        -- Use exactly the same x position calculation as the vertical line
         local x = 1 + (sampleOffset / samplesPerPixel) * (self.width - 2) / self.width
         local y = self.height/2 - (value * scale)
         
