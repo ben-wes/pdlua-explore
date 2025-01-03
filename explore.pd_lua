@@ -64,6 +64,17 @@ function explore:frame()
   if self.needsRepaint then
     self:repaint()
     self.needsRepaint = false
+  else
+    -- Only repaint if array content has changed
+    local array = self:get_array()
+    if array then
+      -- Check if array content has changed since last frame
+      local currentContent = self:get_array_hash()
+      if currentContent ~= self.lastArrayHash then
+        self:repaint()
+        self.lastArrayHash = currentContent
+      end
+    end
   end
   self.frameClock:delay(1000 / self.frameRate)
 end
@@ -71,6 +82,9 @@ end
 function explore:destroy()
   if self.frameClock then
     self.frameClock:destruct()
+  end
+  if self.argsClock then
+    self.argsClock:destruct()
   end
 end
 
@@ -128,19 +142,6 @@ function explore:get_creation_args()
   return args
 end
 
-function explore:frame()
-  self:repaint()
-  -- Schedule next frame
-  self.frameClock:delay(1000 / self.frameRate)
-end
-
--- stop the clock when the object is destroyed
-function explore:destroy()
-  if self.frameClock then
-    self.frameClock:destruct()
-  end
-end
-
 function explore:mouse_move(x, y)
   self.hoverX = x
   self.hoverY = y
@@ -148,24 +149,29 @@ function explore:mouse_move(x, y)
 end
 
 function explore:paint(g)
-  -- Draw background
-  g:set_color(240, 240, 240)
-  g:fill_all()
-  
-  -- Get array data
+  -- Cache frequently accessed values
+  local width, height = self.width, self.height
+  local halfHeight = height / 2
   local array = self:get_array()
   if not array then return end
-  local length = self.arrayLength  -- Use the cached length
+  local length = self.arrayLength
+  local startIndex = self.startIndex
+  local viewSize = self.viewSize
+  local samplesPerPixel = viewSize / width
+  local manualScale = self.manualScale
+  
+  -- Draw background
+  g:set_color(248, 248, 248)
+  g:fill_all()
   
   -- Ensure view parameters are valid
-  self.viewSize = math.max(1, math.min(self.viewSize, self.arrayLength))
-  self.startIndex = math.max(0, math.min(self.startIndex, self.arrayLength - self.viewSize))
+  viewSize = math.max(1, math.min(viewSize, length))
+  startIndex = math.max(0, math.min(startIndex, length - viewSize))
   
-  local samplesPerPixel = self.viewSize / self.width
   local minVal, maxVal = math.huge, -math.huge
 
   -- Only calculate min/max if we're using auto-scale
-  if not self.manualScale then
+  if not manualScale then
     -- Find min/max values in view range using same sampling as drawing
     if samplesPerPixel <= 1 then
       -- When zoomed in, look at actual samples including the rightmost one
@@ -198,15 +204,15 @@ function explore:paint(g)
     end
   else
     -- Use manual scale
-    minVal = -self.manualScale
-    maxVal = self.manualScale
+    minVal = -manualScale
+    maxVal = manualScale
   end
   
   -- Scale factor for y values
   local scale = (self.height/2 - 2) / math.max(math.abs(minVal), math.abs(maxVal))
   
   -- Draw center line
-  g:set_color(200, 200, 200)
+  g:set_color(230, 230, 230)
   local zeroY = self.height/2
   g:draw_line(0, zeroY, self.width, zeroY, 1)
 
@@ -295,7 +301,7 @@ function explore:paint(g)
         local x = 1 + (sampleOffset / samplesPerPixel) * (self.width - 2) / self.width
         local y = self.height/2 - (value * scale)
         
-        g:set_color(0, 80, 160)
+        g:set_color(0, 90, 200)
         g:stroke_rect(x-1, y-1, 3, 3, 1)
         
         -- Draw sample info text
@@ -315,7 +321,6 @@ function explore:paint(g)
   -- Draw samples info at bottom
   local samplesPerPixel = self.viewSize / self.width
   local formatSamplesPerPixel = samplesPerPixel < 1 and "%.2f" or "%.0f"
-  g:set_color(100, 100, 100)
   g:draw_text(string.format("1px = ".. samplesPerPixel .. "sp", 
     samplesPerPixel), 3, self.height - 13, 190, 10)
   -- Calculate number of digits needed based on array length
@@ -363,14 +368,14 @@ function explore:mouse_down(x, y)
 end
 
 function explore:mouse_drag(x, y)
-  -- Use get_array helper instead of direct pd.table access
   local array = self:get_array()
   if not array then return end
-  local length = self.arrayLength  -- Use cached length
+  local length = self.arrayLength
+  local width = self.width
 
   -- Calculate initial samples per pixel
-  local currentSamplesPerPixel = self.dragStartViewSize / self.width
-
+  local currentSamplesPerPixel = self.dragStartViewSize / width
+  
   -- Calculate zoom factor based on vertical drag
   local dy = (y - self.dragStartY) * 0.01
   local zoomFactor = math.exp(dy)
@@ -378,21 +383,28 @@ function explore:mouse_drag(x, y)
   -- Calculate target samples per pixel
   local targetSamplesPerPixel = currentSamplesPerPixel * zoomFactor
   
-  -- Ensure minimum 3 samples in view
+  -- Check if we're crossing the 1:1 boundary
+  if (currentSamplesPerPixel > 1 and targetSamplesPerPixel < 1) or
+     (currentSamplesPerPixel < 1 and targetSamplesPerPixel > 1) then
+    -- Stop at 1:1 unless we started exactly at 1:1
+    if math.abs(currentSamplesPerPixel - 1) > 0.001 then
+      targetSamplesPerPixel = 1
+    end
+  end
+  
+  -- Ensure minimum 2 samples in view
   local minViewSize = 2
   local newViewSize = math.max(minViewSize, math.min(length,
-    math.floor(self.width * targetSamplesPerPixel)))
+    math.floor(width * targetSamplesPerPixel)))
 
-  -- Calculate the pixel offset where the original sample should now be
-  local dx = x - self.dragStartX
   -- Calculate new start index keeping the same view fraction under mouse
-  local currentFraction = (x / self.width)
+  local currentFraction = (x / width)
   local sampleAtMouse = self.dragStartIndex + (self.dragStartFraction * self.dragStartViewSize)
   local newStart = sampleAtMouse - (currentFraction * newViewSize)
   
   -- Update view parameters ensuring bounds
   self.viewSize = newViewSize
-  self.startIndex = math.max(0, math.min(length - self.viewSize,
+  self.startIndex = math.max(0, math.min(length - newViewSize,
     math.floor(newStart)))
   
   self.needsRepaint = true
@@ -438,16 +450,19 @@ end
 
 function explore:generate_colors(count)
   local colors = {}
-  local hue_start, hue_end = table.unpack(self.colors.graphGradients.hue)
-  local sat_start, sat_end = table.unpack(self.colors.graphGradients.saturation)
-  local bright_start, bright_end = table.unpack(self.colors.graphGradients.brightness)
+  local gradients = self.colors.graphGradients
+  local hue_start, hue_end = gradients.hue[1], gradients.hue[2]
+  local sat_start, sat_end = gradients.saturation[1], gradients.saturation[2]
+  local bright_start, bright_end = gradients.brightness[1], gradients.brightness[2]
+  local count_minus_1 = math.max(1, count - 1)
 
   for i = 1, count do
-    local hue = hue_start + (hue_end - hue_start) * ((i - 1) / math.max(1, count - 1))
-    local saturation = sat_start + (sat_end - sat_start) * ((i - 1) / math.max(1, count - 1))
-    local brightness = bright_start + (bright_end - bright_start) * ((i - 1) / math.max(1, count - 1))
+    local t = (i - 1) / count_minus_1
+    local hue = hue_start + (hue_end - hue_start) * t
+    local saturation = sat_start + (sat_end - sat_start) * t
+    local brightness = bright_start + (bright_end - bright_start) * t
     local r, g, b = self:hsv_to_rgb(hue, saturation, brightness)
-    table.insert(colors, {r, g, b})
+    colors[i] = {r, g, b}
   end
 
   return colors
@@ -478,4 +493,25 @@ function explore:in_1_scale(x)
     self.manualScale = nil
   end
   self.needsRepaint = true
+end
+
+-- Add this helper function to compute a simple hash of visible array content
+function explore:get_array_hash()
+  local array = self:get_array()
+  if not array then return nil end
+  
+  -- Only hash visible portion for performance
+  local hash = 0
+  local step = self.viewSize / self.width
+  for i = 0, self.width - 1 do
+    local index = math.floor(self.startIndex + i * step)
+    if index < self.arrayLength then
+      local val = array:get(index)
+      if val then
+        -- Simple rolling hash
+        hash = hash + val
+      end
+    end
+  end
+  return hash
 end
